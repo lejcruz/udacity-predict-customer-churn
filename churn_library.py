@@ -3,8 +3,19 @@
 
 # import libraries
 import os
+import logging
+
+import pandas as pd
+
 os.environ['QT_QPA_PLATFORM']='offscreen'
 
+logging.basicConfig(
+    filename='./results.log',
+    level=logging.INFO,
+    filemode='w',
+    format='%(name)s - %(levelname)s - %(message)s')
+
+DF_PATH = r"./data/bank_data.csv"
 
 
 def import_data(pth):
@@ -14,9 +25,21 @@ def import_data(pth):
     input:
             pth: a path to the csv
     output:
-            df: pandas dataframe
+            df: pandas dataframe or None if errors
     '''	
-    pass
+
+    try:
+        df = pd.read_csv(pth)
+        logging.info('SUCCESS - Data has been loaded')
+
+        return df
+    
+    except FileNotFoundError:
+        logging.error('Its seems that the path provided is wrong')
+        
+        return None
+        
+    
 
 
 def perform_eda(df):
