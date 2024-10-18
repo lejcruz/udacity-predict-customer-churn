@@ -4,6 +4,7 @@
 # import libraries
 import os
 import logging
+from typing import Callable
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -22,6 +23,9 @@ logging.basicConfig(
 # Define constants based on contants.py
 DATA_PATH = cnts.IN_DATA_PATH
 EDA_PATH = cnts.OUT_EDA_PATH
+TARGET_IN_COLUMN = cnts.TARGET_IN_COLUMN
+TARGET_OUT_COLUMN = cnts.TARGET_OUT_COLUMN
+TARGET_FUNCTION = cnts.TARGET_FUNCTION
 # cat_columns = cnts.CAT_COLUMNS
 # quant_columns = cnts.QUANT_COLUMNS
 
@@ -68,7 +72,40 @@ def import_data(pth):
         log_message('ERROR - The provided path is incorrect', level='error')
         return None
         
+# define target column
+def get_target(df: pd.DataFrame, column: str, lambda_function: Callable, target_name='target'):
+    '''
+    Apply a transformation to a specified column in the DataFrame to create a target column, 
+    and then remove the original column.
+
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        The input DataFrame.
+    column : str
+        The name of the column to transform into the target.
+    lambda_function : function
+        A lambda function or any callable that will be applied to the specified column.
+    target_name : str, optional, default='target'
+        The name of the new target column created from the transformation.
+
+    Returns:
+    --------
+    tuple or None:
+        - If successful: Updated DataFrame.
+        - If an error occurs: None
+
+    '''
+
+    try:
+        df[target_name] =  df[column].apply(lambda_function)
+        df.drop(columns=column, inplace=True)
+        log_message(f'SUCCESS - {target_name} target was defined based on {column}')
+        return df
     
+    except Exception as e:  
+        log_message(f'ERROR - It was not possible to calculate the target column: {e}', level='error')
+        return None
 
 class Eda:
     
@@ -146,6 +183,16 @@ class Eda:
                 log_message(f"Saved EDA image for categorical column: {ccol}")
             except Exception as e:
                 log_message(f"ERROR - It's not possible to generate the plot for column {ccol}: {str(e)}", level='error')
+
+        # correlation plot
+        try:
+            plt.figure(figsize=(20,10)) 
+            corrplot = sns.heatmap(self.df.corr(numeric_only=True), annot=False, cmap='Dark2_r', linewidths = 2)
+            self.save_plot(corrplot, f"correlation_plot.png")
+            log_message(f"Saved correlation plot image")
+
+        except Exception as e:
+            log_message(f"ERROR - It's not possible to generate the correlation plot: {str(e)}", level='error')
     
 
     def perform_eda(self):
@@ -258,6 +305,7 @@ def train_models(X_train, X_test, y_train, y_test):
 
 if __name__ == "__main__":
     df = import_data(DATA_PATH)
+    df = get_target(df, TARGET_IN_COLUMN, TARGET_FUNCTION, TARGET_OUT_COLUMN)
 
-    eda = Eda(df, EDA_PATH, ['CLIENTNUM'], 'Attrition_Flag')
+    eda = Eda(df, EDA_PATH, ['CLIENTNUM'], TARGET_OUT_COLUMN)
     eda.perform_eda()

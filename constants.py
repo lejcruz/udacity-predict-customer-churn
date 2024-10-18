@@ -7,6 +7,11 @@ IN_DATA_PATH = r"./data/bank_data.csv"
 OUT_EDA_PATH = r"./images/eda"
 OUT_TESTS_EDA_PATH = r"./images/tests/eda/"
 
+# Target Column
+TARGET_IN_COLUMN = "Attrition_Flag"
+TARGET_OUT_COLUMN = "churn"
+TARGET_FUNCTION = lambda val: 0 if val == "Existing Customer" else 1
+
 # Features
 
 CAT_COLUMNS = [

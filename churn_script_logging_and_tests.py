@@ -13,6 +13,7 @@ logging.basicConfig(
 
 OUT_TESTS_EDA_PATH = constants.OUT_TESTS_EDA_PATH
 
+
 @pytest.fixture
 def sample_df():
     """Fixture for creating a sample DataFrame with some null values."""
@@ -35,6 +36,8 @@ def define_eda(sample_df):
 	return eda
 
 
+
+
 def test_import():
 	'''
 	test data import - this example is completed for you to assist with the other test functions
@@ -52,6 +55,16 @@ def test_import():
 	except AssertionError as err:
 		cls.log_message("Testing import_data: The file doesn't appear to have rows and columns", level='error')
 		raise err
+	
+def test_get_target(sample_df):
+
+	df, target_col = cls.get_target(sample_df,
+								 'C',
+								 lambda val: 0 if val <= 2 else 1,
+								 'new_target')
+	
+    # Check if the target is correctly calculated
+	assert df['new_target'].tolist() == [0, 0, 1, 1]
 
 def test_check_null(define_eda):
 	'''Test function for the eda class and check_null function'''
@@ -86,6 +99,9 @@ def test_eda_plots(define_eda):
 		quant_plot_path = os.path.join(OUT_TESTS_EDA_PATH, f'eda_quant_{col}.png')
 		assert os.path.exists(quant_plot_path), f"Quantitative plot for column '{col}' was not saved"
 
+	#Check if correlation plot was saved
+	corrplot_path = os.path.join(OUT_TESTS_EDA_PATH, f'correlation_plot.png')
+	assert os.path.exists(corrplot_path), f"Correlation plot was not saved"
 
 
 
