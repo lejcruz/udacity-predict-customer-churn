@@ -6,16 +6,47 @@ import os
 import logging
 
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns; sns.set()
+
+import constants as cnts
 
 os.environ['QT_QPA_PLATFORM']='offscreen'
 
 logging.basicConfig(
-    filename='./results.log',
+    filename='./logs/results.log',
     level=logging.INFO,
     filemode='w',
     format='%(name)s - %(levelname)s - %(message)s')
 
-DF_PATH = r"./data/bank_data.csv"
+# Define constants based on contants.py
+DATA_PATH = cnts.IN_DATA_PATH
+EDA_PATH = cnts.OUT_EDA_PATH
+# cat_columns = cnts.CAT_COLUMNS
+# quant_columns = cnts.QUANT_COLUMNS
+
+def log_message(message: str, data=None, level: str = 'info'):
+    """
+    Helper function for logging messages at different levels.
+    
+    Parameters:
+    - message: The log message.
+    - data: Optional additional data to log.
+    - level: The logging level ('info', 'error', 'warning', etc.).
+    """
+    if level == 'info':
+        logging.info(message)
+    elif level == 'error':
+        logging.error(message)
+    elif level == 'warning':
+        logging.warning(message)
+    elif level == 'debug':
+        logging.debug(message)
+    else:
+        logging.info(message)  # Default to info if an invalid level is provided
+    
+    if data is not None:
+        logging.info(data)
 
 
 def import_data(pth):
@@ -29,29 +60,120 @@ def import_data(pth):
     '''	
 
     try:
-        df = pd.read_csv(pth)
-        logging.info('SUCCESS - Data has been loaded')
-
+        df = pd.read_csv(pth, index_col=0)
+        log_message('SUCCESS - Data has been loaded')
         return df
     
     except FileNotFoundError:
-        logging.error('Its seems that the path provided is wrong')
-        
+        log_message('ERROR - The provided path is incorrect', level='error')
         return None
         
     
 
+class Eda:
+    
+    def __init__(self, df: pd.DataFrame, out_pth: str, ids: list, response: str):
+        self.df = df
+        self.out_pth = out_pth
+        self.ids = ids
+        self.response = response
 
-def perform_eda(df):
-    '''
-    perform eda on df and save figures to images folder
-    input:
-            df: pandas dataframe
 
-    output:
-            None
-    '''
-    pass
+    def check_null(self):
+        """
+        Check for missing values in the DataFrame.
+        """
+
+        null_check = self.df.isnull().sum()
+        null_columns = null_check[null_check > 0].index.tolist()
+        null_sum = null_check.sum()
+
+        # calculate the null percentage
+
+        if null_sum > 0:
+            null_percent = (null_check[null_columns] / len(self.df)) * 100
+            log_message(f"The null percentage is {null_percent}", level='warning')
+            return null_columns, null_percent
+        
+        else:
+            log_message("No null values detected on df")
+       
+        return None, None
+    
+
+    def define_feature_types(self) -> tuple:
+        """
+        Separate quantitative and categorical features.
+        """
+
+        df_cols = [col for col in self.df.columns if col not in self.ids]
+        quant_cols = self.df[df_cols].select_dtypes(include=['number']).columns.tolist()
+        cat_cols = self.df[df_cols].select_dtypes(exclude=['number']).columns.tolist()
+
+        return quant_cols, cat_cols
+    
+
+    def save_plot(self, plot, filename: str):
+        """
+        Save Seaborn plot as an image.
+        """
+        fig = plot.get_figure()
+        fig.savefig(f"{self.out_pth}/{filename}", dpi=fig.dpi, bbox_inches='tight')
+        plt.close(fig)
+
+
+    def eda_plots(self):
+        """
+        Generate and save EDA plots.
+        """
+        quant_cols, cat_cols = self.define_feature_types()
+
+        # Quantitative plots
+        for qcol in quant_cols:
+            try:
+                histplot = sns.histplot(self.df[qcol], stat='density', kde=True)
+                self.save_plot(histplot, f"eda_quant_{qcol}.png")
+                log_message(f"Saved EDA image for quantitative column: {qcol}")
+            except Exception as e:
+                log_message(f"ERROR - It's not possible to generate the plot for column {qcol}: {str(e)}", level='error')
+
+
+        # Categorical plots
+        for ccol in cat_cols:
+            try:
+                countplot = sns.countplot(x=ccol, data=self.df)
+                self.save_plot(countplot, f"eda_categ_{ccol}.png")
+                log_message(f"Saved EDA image for categorical column: {ccol}")
+            except Exception as e:
+                log_message(f"ERROR - It's not possible to generate the plot for column {ccol}: {str(e)}", level='error')
+    
+
+    def perform_eda(self):
+        '''
+        Perform EDA on the DataFrame and save figures.
+        '''
+        try:
+            
+            # check null values
+            null_colums, null_percent = self.check_null()
+
+            # describe dataset
+            describe = self.df.describe()
+            log_message("SUCCESS - Performed describe statiscs on Dataset", data=describe)
+
+            # save EDA plots
+            self.eda_plots()
+            log_message("SUCCESS - EDA plots saved")
+
+            null_colums, null_percent = self.check_null()
+            return {'null_columns': null_colums,
+                    'null_percent': null_percent,
+                    'statistics': describe
+                    }
+
+        except Exception as e:
+            log_message("ERROR - EDA could not be performed: {e}", level='error')
+            return None
 
 
 def encoder_helper(df, category_lst, response):
@@ -131,3 +253,11 @@ def train_models(X_train, X_test, y_train, y_test):
               None
     '''
     pass
+
+
+
+if __name__ == "__main__":
+    df = import_data(DATA_PATH)
+
+    eda = Eda(df, EDA_PATH, ['CLIENTNUM'], 'Attrition_Flag')
+    eda.perform_eda()
