@@ -4,6 +4,7 @@ import logging
 import churn_library as cls
 import constants
 import pandas as pd
+import numpy as np
 
 logging.basicConfig(
     filename='./logs/tests_churn_library.log',
@@ -21,7 +22,8 @@ def sample_df():
         'A': [1, 2, None, 4],
         'B': [None, 2, 3, 4],
         'C': [1, 2, 3, 4],
-		'D': ['1', '2', None, '4']
+		'D': ['1', '2', None, '4'],
+		'E': ['A', 'B', 'A', 'B']
     }
     df = pd.DataFrame(data)
     return df
@@ -58,10 +60,10 @@ def test_import():
 	
 def test_get_target(sample_df):
 
-	df, target_col = cls.get_target(sample_df,
-								 'C',
-								 lambda val: 0 if val <= 2 else 1,
-								 'new_target')
+	df = cls.get_target(sample_df,
+					 'C',
+					 lambda val: 0 if val <= 2 else 1,
+					 'new_target')
 	
     # Check if the target is correctly calculated
 	assert df['new_target'].tolist() == [0, 0, 1, 1]
@@ -85,7 +87,7 @@ def test_define_feature_types(define_eda):
 	assert 'A' in quant_cols
 	assert 'D'in cat_cols
 	assert len(quant_cols) == 3
-	assert len(cat_cols) == 1
+	assert len(cat_cols) == 2
 
 	cls.log_message("Testing define_feature_types -  quant_cols: {quant_cols} ; cat_cols: {cat_cols}")
 
@@ -104,21 +106,24 @@ def test_eda_plots(define_eda):
 	assert os.path.exists(corrplot_path), f"Correlation plot was not saved"
 
 
+def test_encoder_helper(sample_df):
+	'''
+	test encoder helper
+	'''
 
+	# perform encoder
 
+	encoder = cls.encoder_helper(sample_df, ['E'], 'C')
 
+	assert 'E_encoded' in encoder.columns
+	assert encoder['E_encoded'].tolist() == [2.0, 3.0, 2.0, 3.0]
 
-# def test_eda(perform_eda):
-# 	'''
-# 	test perform eda function
-# 	'''
+	# Ensure that original columns are dropped when keep_originals=False
+	assert 'E' not in encoder.columns
 
-
-# def test_encoder_helper(encoder_helper):
-# 	'''
-# 	test encoder helper
-# 	'''
-
+	#Ensure that a KeyError is handled when a specified column is missing.
+	key_err_encoder = cls.encoder_helper(sample_df, ['Z'], 'churn')
+	assert key_err_encoder is None
 
 # def test_perform_feature_engineering(perform_feature_engineering):
 # 	'''

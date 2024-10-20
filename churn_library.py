@@ -165,6 +165,9 @@ class Eda:
         """
         quant_cols, cat_cols = self.define_feature_types()
 
+        self.quant_cols = quant_cols
+        self.cat_cols = cat_cols
+
         # Quantitative plots
         for qcol in quant_cols:
             try:
@@ -223,20 +226,53 @@ class Eda:
             return None
 
 
-def encoder_helper(df, category_lst, response):
+def encoder_helper(df, category_lst, target_colum, response='encoded', keep_originals=False):
     '''
     helper function to turn each categorical column into a new column with
-    propotion of churn for each category - associated with cell 15 from the notebook
+    propotion of churn (target_colum) for each category
 
-    input:
-            df: pandas dataframe
-            category_lst: list of columns that contain categorical features
-            response: string of response name [optional argument that could be used for naming variables or index y column]
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        The input DataFrame.
+    category_lst : list
+        List of categorical columns to be encoded.
+    target_colum : str
+        The name of the target column to calculate mean values for encoding.
+    response : str, optional, default='encoded'
+        Suffix to add to the encoded column names.
+    keep_originals : bool, optional, default=False
+        Whether to keep the original categorical columns or drop them.
 
-    output:
-            df: pandas dataframe with new columns for
+    Returns:
+    --------
+    pd.DataFrame
+        The modified DataFrame with encoded categorical columns.
     '''
-    pass
+
+    try:
+        for col in category_lst:
+            cat_mean = df.groupby(col)[target_colum].mean()
+            encoded_col_name = f'{col}_{response}'
+            df[encoded_col_name] = df[col].map(cat_mean)
+            
+        log_message("Ecoding done successfully - Sample Data:")
+        log_message("", df.head(2))
+
+
+        if not keep_originals:
+            return df.drop(columns=category_lst)
+
+        return df
+    
+    except KeyError as err:
+        log_message(f"ERROR - Column error: {err}", level="error")
+        return None
+    
+    except Exception as e:
+        log_message(f"ERROR - Unexpected error: {e}", level="error")
+        return None
+            
 
 
 def perform_feature_engineering(df, response):
@@ -304,8 +340,17 @@ def train_models(X_train, X_test, y_train, y_test):
 
 
 if __name__ == "__main__":
+    
+    # Import data
     df = import_data(DATA_PATH)
+
+    # Calcuted the target column (y)
     df = get_target(df, TARGET_IN_COLUMN, TARGET_FUNCTION, TARGET_OUT_COLUMN)
 
+    # Perform EDA
     eda = Eda(df, EDA_PATH, ['CLIENTNUM'], TARGET_OUT_COLUMN)
     eda.perform_eda()
+
+    # Perform encoding in the categorical columns
+    df_encoded = encoder_helper(df, eda.cat_cols, TARGET_OUT_COLUMN) 
+
