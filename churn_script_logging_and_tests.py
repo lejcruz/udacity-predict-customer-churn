@@ -125,10 +125,18 @@ def test_encoder_helper(sample_df):
 	key_err_encoder = cls.encoder_helper(sample_df, ['Z'], 'churn')
 	assert key_err_encoder is None
 
-# def test_perform_feature_engineering(perform_feature_engineering):
-# 	'''
-# 	test perform_feature_engineering
-# 	'''
+def test_perform_feature_engineering(sample_df):
+	'''
+	test perform_feature_engineering
+	'''
+
+	X_train, X_test, y_train, y_test = cls.perform_feature_engineering(sample_df, ['A'], 'C', 0.5)
+
+	# test if splits where correctly made
+	assert [len(X_train), len(y_train)] == [2, 2]
+
+	# test if id columns is not in the final X set
+	assert 'A' not in X_train.columns
 
 
 # def test_train_models(train_models):

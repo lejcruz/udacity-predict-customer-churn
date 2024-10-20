@@ -10,6 +10,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns; sns.set()
 
+from sklearn.model_selection import train_test_split
+
 import constants as cnts
 
 os.environ['QT_QPA_PLATFORM']='offscreen'
@@ -23,9 +25,13 @@ logging.basicConfig(
 # Define constants based on contants.py
 DATA_PATH = cnts.IN_DATA_PATH
 EDA_PATH = cnts.OUT_EDA_PATH
+ID_COLUMNS_LST = cnts.ID_COLUMNS_LST
 TARGET_IN_COLUMN = cnts.TARGET_IN_COLUMN
 TARGET_OUT_COLUMN = cnts.TARGET_OUT_COLUMN
 TARGET_FUNCTION = cnts.TARGET_FUNCTION
+TEST_SIZE = cnts.TEST_SIZE
+RANDOM_STATE = cnts.RANDOM_STATE
+
 # cat_columns = cnts.CAT_COLUMNS
 # quant_columns = cnts.QUANT_COLUMNS
 
@@ -275,18 +281,80 @@ def encoder_helper(df, category_lst, target_colum, response='encoded', keep_orig
             
 
 
-def perform_feature_engineering(df, response):
-    '''
-    input:
-              df: pandas dataframe
-              response: string of response name [optional argument that could be used for naming variables or index y column]
+def perform_feature_engineering(df: pd.DataFrame, id_columns: list, target_column: str, test_size: float = 0.3, random_state: int =42):
+        
+    """
+    Performs feature engineering by splitting the DataFrame into training and testing sets.
+    
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        The DataFrame containing the features and target column.
+    id_columns : list
+        List of columns that should be excluded from the feature set (e.g., identifiers).
+    target_column : str
+        Name of the target column.
+    test_size : float, optional (default=0.3)
+        Proportion of the dataset to include in the test split.
+    random_state : int, optional (default=42)
+        Random seed for reproducibility in the train-test split.
+    
+    Returns:
+    --------
+    X_train : pd.DataFrame
+        Training set features.
+    X_test : pd.DataFrame
+        Testing set features.
+    y_train : pd.Series
+        Training set target.
+    y_test : pd.Series
+        Testing set target.
 
-    output:
-              X_train: X training data
-              X_test: X testing data
-              y_train: y training data
-              y_test: y testing data
-    '''
+    Raises:
+    -------
+    ValueError:
+        If the 'id_columns' is not a list or `target_column` is missing from the DataFrame.
+    
+    Example:
+    --------
+    >>> X_train, X_test, y_train, y_test = perform_feature_engineering(df, ['CLIENTNUM'], 'churn')
+    """
+
+
+
+    try:
+        # Validate and join Id Columns and Target in a unique list
+        if id_columns is not None and not isinstance(id_columns, list):
+            log_message(f"ERROR id_columns must be a list. Received {type(id_columns).__name__}", level='error')
+            raise ValueError
+
+        X_drop_columns = id_columns + [target_column] if id_columns else [id_columns]
+
+        # Define X and Y
+        y = df[target_column]
+        X = df.drop(columns=X_drop_columns)
+
+        # Split between train and test sets
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state)
+        
+        log_message("SUCCESS - Data has been splited - shapes", data=[X_train.shape, X_test.shape, y_train.shape, y_test.shape])
+
+
+    except ValueError as err:
+        log_message(f"ERROR - Validation Failed:  {err}", level='error')
+        return None, None, None, None
+
+    except KeyError as err:
+        log_message(f"ERROR - Some columns are missing in df:  {err}", level='error')
+        return None, None, None, None
+
+    except Exception as e:
+        log_message(f"ERROR - Unexpected error:  {e}", level='error')
+        return None, None, None, None
+
+
+    return X_train, X_test, y_train, y_test
+
 
 def classification_report_image(y_train,
                                 y_test,
@@ -348,9 +416,16 @@ if __name__ == "__main__":
     df = get_target(df, TARGET_IN_COLUMN, TARGET_FUNCTION, TARGET_OUT_COLUMN)
 
     # Perform EDA
-    eda = Eda(df, EDA_PATH, ['CLIENTNUM'], TARGET_OUT_COLUMN)
+    eda = Eda(df, EDA_PATH, ID_COLUMNS_LST, TARGET_OUT_COLUMN)
     eda.perform_eda()
 
     # Perform encoding in the categorical columns
     df_encoded = encoder_helper(df, eda.cat_cols, TARGET_OUT_COLUMN) 
+
+    # Split between train and test sets
+    X_train, X_test, y_train, y_test = perform_feature_engineering(df_encoded,
+                                                                   ID_COLUMNS_LST,
+                                                                   TARGET_OUT_COLUMN,
+                                                                   TEST_SIZE,
+                                                                   RANDOM_STATE)
 
