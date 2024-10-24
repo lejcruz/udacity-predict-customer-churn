@@ -5,6 +5,10 @@ import churn_library as cls
 import constants
 import pandas as pd
 import numpy as np
+from sklearn.datasets import make_classification
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+import pytest
 
 logging.basicConfig(
     filename='./logs/tests_churn_library.log',
@@ -13,6 +17,8 @@ logging.basicConfig(
     format='%(name)s - %(levelname)s - %(message)s')
 
 OUT_TESTS_EDA_PATH = constants.OUT_TESTS_EDA_PATH
+OUT_TESTS_MODEL_REPORTS_PATH = constants.OUT_TESTS_MODEL_REPORTS_PATH
+OUT_TESTS_MODEL_ARTIFACTS_PATH = constants.OUT_TESTS_MODEL_ARTIFACTS_PATH
 
 
 @pytest.fixture
@@ -37,7 +43,27 @@ def define_eda(sample_df):
 				response='C')
 	return eda
 
+@pytest.fixture
+def sample_features_data():
+    """Fixture to create sample data for training and testing."""
+    X_train, y_train = make_classification(n_samples=100, n_features=10, random_state=42)
+    X_test, y_test = make_classification(n_samples=50, n_features=10, random_state=42)
+    return pd.DataFrame(X_train), pd.Series(y_train), pd.DataFrame(X_test), pd.Series(y_test)
 
+@pytest.fixture
+def logistic_model():
+    """Fixture to create a logistic regression model."""
+    return LogisticRegression()
+
+@pytest.fixture
+def random_forest_model():
+    """Fixture to create a random forest model."""
+    return RandomForestClassifier()
+
+@pytest.fixture
+def model_instance():
+    """Fixture to create a Model instance with temporary paths."""
+    return cls.Model(experiment_name="test_experiment", out_image_pth=OUT_TESTS_MODEL_REPORTS_PATH, out_artifact_pth=OUT_TESTS_MODEL_ARTIFACTS_PATH)
 
 
 def test_import():
@@ -138,15 +164,55 @@ def test_perform_feature_engineering(sample_df):
 	# test if id columns is not in the final X set
 	assert 'A' not in X_train.columns
 
+# Test Model traning and report
 
-# def test_train_models(train_models):
-# 	'''
-# 	test train_models
-# 	'''
+def test_model_train(model_instance, logistic_model, sample_features_data):
 
+    """Test if the model is trained successfully."""
+
+    X_train, y_train, _, _ = sample_features_data
+    trained_model = model_instance.model_train(logistic_model, X_train, y_train)
+
+    assert trained_model is not None
+    assert hasattr(model_instance, 'cls')
+
+def test_model_predict(model_instance, logistic_model, sample_features_data):
+    """Test if the model makes predictions."""
+    X_train, y_train, X_test, _ = sample_features_data
+    model_instance.model_train(logistic_model, X_train, y_train)
+    y_train_preds, y_test_preds = model_instance.model_predict(X_test)
+
+    assert len(y_train_preds) == len(y_train)
+    assert len(y_test_preds) == len(X_test)
+
+def test_model_report(model_instance, logistic_model, sample_features_data):
+    """Test if the model generates a report without errors."""
+    X_train, y_train, X_test, y_test = sample_features_data
+    model_instance.model_train(logistic_model, X_train, y_train)
+    model_instance.model_predict(X_test)
+    model_instance.model_report(y_test)
+
+    # Check if the report has been created successfully
+    assert model_instance.report is not None
+
+def test_compare_models(sample_features_data, model_instance, logistic_model, random_forest_model):
+    """Test the compare_models function."""
+    X_train, y_train, X_test, y_test = sample_features_data
+
+    # Train two models
+    model_instance.model_train(logistic_model, X_train, y_train)
+    model_instance.model_predict(X_test)
+
+    model2 = cls.Model("test_model2", OUT_TESTS_MODEL_REPORTS_PATH, OUT_TESTS_MODEL_ARTIFACTS_PATH)
+    model2.model_train(random_forest_model, X_train, y_train)
+    model2.model_predict(X_test)
+
+    # Compare the two models
+    best_model = cls.compare_models([model_instance, model2], y_test)
+    assert best_model in [model_instance.experiment_name, model2.experiment_name]
 
 if __name__ == "__main__":
-	pass
+	pytest.main(["-v", __file__])
 
 
 
