@@ -5,12 +5,21 @@
 import os
 import logging
 from typing import Callable
+import time
 
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns; sns.set()
 
+from typing import Union
 from sklearn.model_selection import train_test_split
+from sklearn.base import ClassifierMixin
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import RocCurveDisplay, classification_report
+import shap
+import joblib
 
 import constants as cnts
 
@@ -31,6 +40,8 @@ TARGET_OUT_COLUMN = cnts.TARGET_OUT_COLUMN
 TARGET_FUNCTION = cnts.TARGET_FUNCTION
 TEST_SIZE = cnts.TEST_SIZE
 RANDOM_STATE = cnts.RANDOM_STATE
+OUT_MODEL_REPORTS_PATH = cnts.OUT_MODEL_REPORTS_PATH
+OUT_MODEL_ARTIFACTS_PATH = cnts.OUT_MODEL_ARTIFACTS_PATH
 
 # cat_columns = cnts.CAT_COLUMNS
 # quant_columns = cnts.QUANT_COLUMNS
@@ -112,6 +123,23 @@ def get_target(df: pd.DataFrame, column: str, lambda_function: Callable, target_
     except Exception as e:  
         log_message(f'ERROR - It was not possible to calculate the target column: {e}', level='error')
         return None
+    
+def save_plot(plot, out_pth, filename: str):
+    try:
+        # Check if the plot is a Seaborn plot with `get_figure()`
+        if hasattr(plot, 'get_figure'):
+            fig = plot.get_figure()
+        else:
+            # If plot doesn't have `get_figure()`, assume it is a Matplotlib figure
+            fig = plt.gcf()
+
+        plt.tight_layout()
+        fig.savefig(f"{out_pth}/{filename}", dpi=fig.dpi, bbox_inches='tight', pad_inches = 0)
+        plt.close(fig)
+        log_message(f'SUCCESS - Plot saved as {filename} at {out_pth}')
+        
+    except Exception as e:
+        log_message(f'ERROR - Could not save the plot: {e}', level='error')
 
 class Eda:
     
@@ -156,15 +184,6 @@ class Eda:
         return quant_cols, cat_cols
     
 
-    def save_plot(self, plot, filename: str):
-        """
-        Save Seaborn plot as an image.
-        """
-        fig = plot.get_figure()
-        fig.savefig(f"{self.out_pth}/{filename}", dpi=fig.dpi, bbox_inches='tight')
-        plt.close(fig)
-
-
     def eda_plots(self):
         """
         Generate and save EDA plots.
@@ -178,7 +197,7 @@ class Eda:
         for qcol in quant_cols:
             try:
                 histplot = sns.histplot(self.df[qcol], stat='density', kde=True)
-                self.save_plot(histplot, f"eda_quant_{qcol}.png")
+                save_plot(histplot, self.out_pth, f"eda_quant_{qcol}.png")
                 log_message(f"Saved EDA image for quantitative column: {qcol}")
             except Exception as e:
                 log_message(f"ERROR - It's not possible to generate the plot for column {qcol}: {str(e)}", level='error')
@@ -188,7 +207,7 @@ class Eda:
         for ccol in cat_cols:
             try:
                 countplot = sns.countplot(x=ccol, data=self.df)
-                self.save_plot(countplot, f"eda_categ_{ccol}.png")
+                save_plot(countplot, self.out_pth, f"eda_categ_{ccol}.png")
                 log_message(f"Saved EDA image for categorical column: {ccol}")
             except Exception as e:
                 log_message(f"ERROR - It's not possible to generate the plot for column {ccol}: {str(e)}", level='error')
@@ -197,7 +216,7 @@ class Eda:
         try:
             plt.figure(figsize=(20,10)) 
             corrplot = sns.heatmap(self.df.corr(numeric_only=True), annot=False, cmap='Dark2_r', linewidths = 2)
-            self.save_plot(corrplot, f"correlation_plot.png")
+            save_plot(corrplot, self.out_pth, f"correlation_plot.png")
             log_message(f"Saved correlation plot image")
 
         except Exception as e:
@@ -356,55 +375,300 @@ def perform_feature_engineering(df: pd.DataFrame, id_columns: list, target_colum
     return X_train, X_test, y_train, y_test
 
 
-def classification_report_image(y_train,
-                                y_test,
-                                y_train_preds_lr,
-                                y_train_preds_rf,
-                                y_test_preds_lr,
-                                y_test_preds_rf):
-    '''
-    produces classification report for training and testing results and stores report as image
-    in images folder
-    input:
-            y_train: training response values
-            y_test:  test response values
-            y_train_preds_lr: training predictions from logistic regression
-            y_train_preds_rf: training predictions from random forest
-            y_test_preds_lr: test predictions from logistic regression
-            y_test_preds_rf: test predictions from random forest
+from typing import Union
+from sklearn.base import ClassifierMixin
+    
+class Model:
+    """
+    A class to manage machine learning models, including training, predictions,
+    reporting, and feature importance plotting.
+    
+    Attributes:
+    ----------
+    experiment_name : str
+        Name of the experiment for logging and saving plots.
+    
+    Methods:
+    -------
+    model_train(classifier, X_train, y_train, grid_params={}, cv=5):
+        Trains a model with optional grid search for hyperparameter tuning.
+    
+    model_predict(X_test):
+        Makes predictions for train and test sets using the trained model.
+    
+    model_report(y_test):
+        Generates a classification report for train and test sets and saves the report.
+    
+    plot_roc_curve():
+        Plots and saves the ROC curve for the model.
+    
+    feature_importance():
+        Plots and saves feature importance using SHAP values or coefficients.
+    
+    model_save():
+        Saves the trained model to disk.
+    
+    run_model_pipeline(classifier, X_train, X_test, y_train, y_test, grid_params={}, cv=None):
+        Executes the full machine learning pipeline: training, prediction, reporting, and saving the model.
+    """
 
-    output:
-             None
-    '''
-    pass
+    def __init__(self, experiment_name: str, out_image_pth: str, out_artifact_pth: bytes):
+        """
+        Initializes the Model object with the experiment name.
+        
+        Parameters:
+        ----------
+        experiment_name : str
+            The name of the experiment, used for logging and saving plots.
+        out_image_pth : str
+            The path to save the model report image
+        out_artifact_pth : str
+            The path to save the model artifact usually a pikle file
+        """
+
+        self.experiment_name = experiment_name
+        self.out_image_pth = out_image_pth
+        self.out_artifact_pth = out_artifact_pth
+
+    def model_train(self,
+                    classifier: ClassifierMixin,
+                    X_train: Union[pd.DataFrame, pd.Series],
+                    y_train: Union[pd.DataFrame, pd.Series],
+                    grid_params: dict = {},
+                    cv: int = 5
+                    ):
+        """
+        Trains a classifier model, optionally using GridSearchCV for hyperparameter tuning.
+        
+        Parameters:
+        ----------
+        classifier : ClassifierMixin
+            The machine learning classifier to train.
+        X_train : pd.DataFrame or pd.Series
+            The features for training.
+        y_train : pd.DataFrame or pd.Series
+            The target variable for training.
+        grid_params : dict, optional
+            The hyperparameter grid for grid search (default is {}).
+        cv : int, optional
+            The number of cross-validation folds (default is 5).
+        
+        Returns:
+        -------
+        Trained model or best estimator from grid search.
+        """
+
+        # attribute X_train and y_train for latter use
+        self.X_train = X_train
+        self.y_train = y_train
+
+        try:
+            cls = classifier
+
+            if grid_params:
+                grid_cv = GridSearchCV(estimator=cls, param_grid=grid_params, cv=cv)
+                grid_cv.fit(X_train, y_train)
+                self.cls = grid_cv.best_estimator_
+
+                log_message(f"Successfully fitted  grid search classifier and found best estimator")
+                return grid_cv.best_estimator_
+
+            else:
+                cls.fit(X_train, y_train)
+                self.cls = cls
+                log_message(f"Successfully fitted the classifier")
+                return cls
+
+        except Exception as e:
+            log_message(f"ERROR: Model training failed - {e}", level='error')
 
 
-def feature_importance_plot(model, X_data, output_pth):
-    '''
-    creates and stores the feature importances in pth
-    input:
-            model: model object containing feature_importances_
-            X_data: pandas dataframe of X values
-            output_pth: path to store the figure
+    def model_predict(self, X_test: Union[pd.DataFrame, pd.Series]):
+        """
+        Generates predictions for the training and test sets using the trained model.
+        
+        Parameters:
+        ----------
+        X_test : pd.DataFrame or pd.Series
+            The test set features.
+        
+        Returns:
+        -------
+        y_train_preds, y_test_preds : tuple of arrays
+            Predictions for training and test sets.
+        """
+        
+        self.X_test = X_test
 
-    output:
-             None
-    '''
-    pass
+        try:
+            y_train_preds = self.cls.predict(self.X_train)
+            y_test_preds = self.cls.predict(X_test)
+            log_message(f"Successfully predicted the model")
 
-def train_models(X_train, X_test, y_train, y_test):
-    '''
-    train, store model results: images + scores, and store models
-    input:
-              X_train: X training data
-              X_test: X testing data
-              y_train: y training data
-              y_test: y testing data
-    output:
-              None
-    '''
-    pass
+            self.y_train_preds, self.y_test_preds  = y_train_preds, y_test_preds
 
+            return y_train_preds, y_test_preds
+
+        except Exception as e:
+            log_message(f"ERROR: was not possible to predict the model: {e}", level='error')    
+            self.y_train_preds, self.y_test_preds  = None, None
+
+            return None, None
+
+    def model_report(self, y_test):
+        """
+        Generates and saves a classification report for the training and test sets.
+        
+        Parameters:
+        ----------
+        y_test : pd.DataFrame or pd.Series
+            The true target values for the test set.
+        """
+        try:
+            self.y_test = y_test
+
+            plt.rc('figure', figsize=(5, 5))
+            plt.text(0.01, 1.25, str(f'{self.experiment_name} Train'), {'fontsize': 10}, fontproperties = 'monospace')
+            plt.text(0.01, 0.05, str(classification_report(y_test, self.y_test_preds)), {'fontsize': 10}, fontproperties = 'monospace') # approach improved by OP -> monospace!
+            plt.text(0.01, 0.6, str(f'{self.experiment_name} Test'), {'fontsize': 10}, fontproperties = 'monospace')
+            plt.text(0.01, 0.7, str(classification_report(self.y_train, self.y_train_preds)), {'fontsize': 10}, fontproperties = 'monospace') # approach improved by OP -> monospace!
+            plt.axis('off')
+
+            self.report = plt
+            save_plot(plt, self.out_image_pth , f'{self.experiment_name}_report.png')
+
+        except Exception as e:
+            log_message(f"ERROR: Failed to generate model report - {e}", level='error')
+
+        
+
+    def plot_roc_curve(self):
+        """
+        Plots and saves the ROC curve for the trained model.
+        """
+        try:
+            plot = RocCurveDisplay.from_estimator(self.cls, self.X_test, self.y_test)
+            save_plot(plot, self.out_image_pth, f'{self.experiment_name}_roccurve.png')
+
+        except Exception as e:
+            log_message(f"ERROR: Failed to plot ROC curve - {e}", level='error')
+
+
+    def feature_importance(self):
+        """
+        Plots and saves the feature importance of the trained model, using SHAP values for tree-based models.
+        """
+        try:
+        
+            if isinstance(self.cls, LogisticRegression):
+                importances = self.cls.coef_
+                names = self.cls.feature_names_in_
+                df_imp = pd.DataFrame(importances, columns=names , index=['Coef']).T
+                plot_imp = df_imp.plot(kind='bar', figsize=(10,4))
+
+            else:
+                explainer = shap.TreeExplainer(self.cls)
+                shap_values = explainer.shap_values(self.X_test)
+                plot_imp = shap.summary_plot(shap_values, self.X_test, plot_type="bar")
+
+            save_plot(plot_imp, self.out_image_pth, f'{self.experiment_name}_feature_importances.png')
+
+        except Exception as e:
+            log_message(f"ERROR: Failed to plot feature importance - {e}", level='error')
+
+    def model_save(self):
+        """
+        Saves the trained model as a pickle file.
+        """
+        try:
+            # save best model
+            joblib.dump(self.cls, os.path.join(self.out_artifact_pth, f'{self.experiment_name}.pkl'))
+            log_message(f"Model saved successfully as {self.experiment_name}.pkl")
+
+        except Exception as e:
+            log_message(f"ERROR: Failed to save the model - {e}", level='error')
+
+
+    def run_model_pipeline(self, classifier, X_train, X_test, y_train, y_test, grid_params={}, cv= None):
+        """
+        Executes the entire machine learning pipeline: training, predicting, reporting, and saving the model.
+        
+        Parameters:
+        ----------
+        classifier : ClassifierMixin
+            The classifier model to train and evaluate.
+        X_train : pd.DataFrame
+            Training data features.
+        X_test : pd.DataFrame
+            Test data features.
+        y_train : pd.Series
+            Training data target.
+        y_test : pd.Series
+            Test data target.
+        grid_params : dict, optional
+            Hyperparameters for grid search (default is {}).
+        cv : int, optional
+            Number of cross-validation folds (default is None).
+        """
+
+        start_time = time.time()  # Start the timer
+
+        self.model_train(classifier, X_train, y_train, grid_params, cv)
+        self.model_predict(X_test)
+        self.model_report(y_test)
+        self.plot_roc_curve()
+        self.feature_importance()
+        self.model_save()
+        
+        # Calculate and log elapsed time
+        elapsed_time = time.time() - start_time  # End the timer
+        log_message(f"Successfully runned the model pipeline and saved images and artifacts")
+        log_message(f"Pipeline completed in {elapsed_time:.2f} seconds")
+
+
+def compare_models(models: list, y_test: pd.Series, metric: str = 'f1-score' ):
+    """
+    Compares multiple trained models and decides the best one based on the F1-score 
+    (or another metric if needed) from the classification reports.
+    
+    Parameters:
+    ----------
+    models : list
+        A list of Model objects to compare.
+    y_test : pd.Series
+        The true labels for the test set.
+    metric:
+        The metric name in which to compare the models, must e compatible with the model_report
+    
+    Returns:
+    -------
+    str
+        The name of the best model.
+    """
+    results = {}
+
+    try:
+        for model in models:
+            # Get predictions for the current model
+            y_test_preds = model.y_test_preds
+            
+            report = classification_report(y_test, y_test_preds, output_dict=True)
+            metric_result = report['weighted avg'][metric]
+            log_message(f"{model.experiment_name} {metric} (weighted avg): {metric_result:.4f}")
+            
+            # Store the score in results
+            results[model.experiment_name] = metric_result
+
+        # Determine the best model based on metric
+        best_model_name = max(results, key=results.get)
+        best_metric = results[best_model_name]
+        
+        log_message(f"The best model is {best_model_name} with {metric}: {best_metric:.4f}")
+
+    except Exception as e:
+        log_message(f"ERROR - Unexpected Error {e}", level='error')
+    
+    return best_model_name
 
 
 if __name__ == "__main__":
@@ -428,4 +692,42 @@ if __name__ == "__main__":
                                                                    TARGET_OUT_COLUMN,
                                                                    TEST_SIZE,
                                                                    RANDOM_STATE)
+    
+    #Run the model pipeline for logistic regression
+    exp_logreg = Model("Logistic Regression",
+                       OUT_MODEL_REPORTS_PATH,
+                       OUT_MODEL_ARTIFACTS_PATH )
+
+    exp_logreg.run_model_pipeline(LogisticRegression(solver='newton-cg', max_iter=3000),
+                             X_train, 
+                             X_test, 
+                             y_train, 
+                             y_test)
+    
+    #Run the model pipeline for Random Forest
+    param_grid = { 
+        'n_estimators': [200, 500],
+        'max_features': ['log2', 'sqrt'],
+        'max_depth' : [4,5,100],
+        'criterion' :['gini', 'entropy']
+    }
+
+    exp_random = Model("Random Forest",
+                       OUT_MODEL_REPORTS_PATH,
+                       OUT_MODEL_ARTIFACTS_PATH )
+
+    exp_random.run_model_pipeline(RandomForestClassifier(random_state=42),
+                             X_train, 
+                             X_test, 
+                             y_train, 
+                             y_test,
+                             param_grid,
+                             5)
+
+    # compare the models 
+    compare_models([exp_logreg, exp_random], y_test)
+
+
+
+
 

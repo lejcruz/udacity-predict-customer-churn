@@ -6,6 +6,10 @@ IN_DATA_PATH = r"./data/bank_data.csv"
 # Outputs
 OUT_EDA_PATH = r"./images/eda"
 OUT_TESTS_EDA_PATH = r"./images/tests/eda/"
+OUT_MODEL_REPORTS_PATH = r"./images/model_report/"
+OUT_TESTS_MODEL_REPORTS_PATH = r"./images/tests/model_report/"
+OUT_MODEL_ARTIFACTS_PATH = r"./models/"
+OUT_TESTS_MODEL_ARTIFACTS_PATH = r"./models/tests"
 
 # ID Columns
 ID_COLUMNS_LST = ['CLIENTNUM']
